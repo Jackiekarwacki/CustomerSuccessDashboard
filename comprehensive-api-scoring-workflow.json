@@ -1,0 +1,489 @@
+{
+  "name": "Comprehensive Customer Health Scoring - HubSpot + Zendesk + Notion",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * 1"
+            }
+          ]
+        }
+      },
+      "id": "weekly-api-trigger",
+      "name": "Weekly Monday 8AM Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 400]
+    },
+    {
+      "parameters": {
+        "databaseId": "YOUR_CUSTOMER_SUCCESS_DATABASE_ID",
+        "simple": false,
+        "options": {}
+      },
+      "id": "get-notion-clients",
+      "name": "Get Client List from Notion",
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2,
+      "position": [460, 400],
+      "credentials": {
+        "notionApi": {
+          "id": "YOUR_NOTION_CREDENTIAL_ID",
+          "name": "Notion API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://api.hubapi.com/crm/v3/objects/companies/search",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "requestMethod": "POST",
+        "jsonParameters": true,
+        "bodyParametersJson": "={\n  \"filterGroups\": [\n    {\n      \"filters\": [\n        {\n          \"propertyName\": \"name\",\n          \"operator\": \"EQ\",\n          \"value\": \"{{ $json.properties['Client Name'].title[0].plain_text }}\"\n        }\n      ]\n    }\n  ],\n  \"properties\": [\"name\", \"domain\", \"hs_lead_status\", \"hs_analytics_last_visit_timestamp\", \"notes_last_updated\", \"hs_total_deal_value\"],\n  \"limit\": 1\n}",
+        "options": {}
+      },
+      "id": "get-hubspot-company",
+      "name": "Get HubSpot Company Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [680, 200],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "YOUR_HUBSPOT_CREDENTIAL_ID",
+          "name": "HubSpot API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://api.hubapi.com/crm/v3/objects/meetings/search",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "requestMethod": "POST",
+        "jsonParameters": true,
+        "bodyParametersJson": "={\n  \"filterGroups\": [\n    {\n      \"filters\": [\n        {\n          \"propertyName\": \"hs_meeting_title\",\n          \"operator\": \"CONTAINS_TOKEN\",\n          \"value\": \"{{ $json.properties['Client Name'].title[0].plain_text }}\"\n        },\n        {\n          \"propertyName\": \"hs_meeting_start_time\",\n          \"operator\": \"GTE\",\n          \"value\": \"{{ new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString() }}\"\n        }\n      ]\n    }\n  ],\n  \"properties\": [\"hs_meeting_title\", \"hs_meeting_body\", \"hs_meeting_start_time\", \"hs_meeting_outcome\", \"hs_meeting_notes\"],\n  \"limit\": 50\n}",
+        "options": {}
+      },
+      "id": "get-hubspot-meetings",
+      "name": "Get HubSpot Meetings (3mo)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [680, 320],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "YOUR_HUBSPOT_CREDENTIAL_ID",
+          "name": "HubSpot API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://{{ $json.properties['Zendesk Subdomain']?.rich_text?.[0]?.plain_text || 'yoursubdomain' }}.zendesk.com/api/v2/search.json?query=type:ticket organization:\"{{ $json.properties['Client Name'].title[0].plain_text }}\" created>{{ new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0] }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "options": {}
+      },
+      "id": "get-zendesk-tickets",
+      "name": "Get Zendesk Support Tickets",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [680, 440],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "YOUR_ZENDESK_CREDENTIAL_ID",
+          "name": "Zendesk API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://{{ $json.properties['Zendesk Subdomain']?.rich_text?.[0]?.plain_text || 'yoursubdomain' }}.zendesk.com/api/v2/search.json?query=type:ticket organization:\"{{ $json.properties['Client Name'].title[0].plain_text }}\" priority:high OR priority:urgent created>{{ new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0] }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "options": {}
+      },
+      "id": "get-zendesk-critical",
+      "name": "Get Critical Zendesk Tickets",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [680, 560],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "YOUR_ZENDESK_CREDENTIAL_ID",
+          "name": "Zendesk API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Comprehensive Customer Health Score Calculator\n// Combines data from HubSpot, Zendesk, and Notion\n\nconst items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const client = item.json;\n  \n  // Extract client data from Notion\n  const clientName = client.properties['Client Name']?.title?.[0]?.plain_text || 'Unknown Client';\n  const clientId = client.id;\n  \n  if (!clientName || clientName === 'Unknown Client') {\n    continue;\n  }\n  \n  // Get API data from previous nodes\n  const hubspotCompany = $node['Get HubSpot Company Data'].json?.results?.[0] || {};\n  const hubspotMeetings = $node['Get HubSpot Meetings (3mo)'].json?.results || [];\n  const zendeskTickets = $node['Get Zendesk Support Tickets'].json?.results || [];\n  const zendeskCritical = $node['Get Critical Zendesk Tickets'].json?.results || [];\n  \n  // Feature Adoption Data (from Notion - manually entered)\n  const featuresUsed = client.properties['Features Used']?.number || 0;\n  const totalFeatures = client.properties['Total Features Available']?.number || 20;\n  const advancedFeaturesUsed = client.properties['Advanced Features Used']?.number || 0;\n  \n  // Calculate Feature Adoption Score\n  const featureAdoptionRate = totalFeatures > 0 ? (featuresUsed / totalFeatures) * 100 : 0;\n  const featureScore = Math.min(100, \n    (featureAdoptionRate * 0.7) + (advancedFeaturesUsed * 5)\n  );\n  \n  // Relationship Data - Combined HubSpot + Notion\n  const totalMeetings = hubspotMeetings.length;\n  \n  // Analyze meeting sentiment from HubSpot data\n  let positiveMeetings = 0;\n  let meetingTopics = [];\n  let meetingHighlights = [];\n  \n  hubspotMeetings.forEach(meeting => {\n    const title = meeting.properties?.hs_meeting_title || '';\n    const outcome = meeting.properties?.hs_meeting_outcome || '';\n    const notes = meeting.properties?.hs_meeting_notes || meeting.properties?.hs_meeting_body || '';\n    \n    // Count as positive if outcome contains positive keywords\n    if (outcome.toLowerCase().includes('positive') || \n        outcome.toLowerCase().includes('success') ||\n        outcome.toLowerCase().includes('good') ||\n        notes.toLowerCase().includes('satisfied') ||\n        notes.toLowerCase().includes('pleased')) {\n      positiveMeetings++;\n    }\n    \n    if (title) meetingTopics.push(title);\n    if (notes) meetingHighlights.push(notes.substring(0, 100) + '...');\n  });\n  \n  // Renewal and contact timing\n  const renewalDateStr = client.properties['Renewal Date']?.date?.start;\n  const renewalDate = renewalDateStr ? new Date(renewalDateStr) : new Date(Date.now() + 365*24*60*60*1000);\n  const daysToRenewal = Math.max(0, \n    Math.ceil((renewalDate - new Date()) / (1000 * 60 * 60 * 24))\n  );\n  \n  // Last contact from HubSpot or Notion\n  const hubspotLastContact = hubspotCompany.properties?.notes_last_updated;\n  const notionLastContact = client.properties['Last Contact Date']?.date?.start;\n  \n  let lastContactDays = 999;\n  if (hubspotLastContact) {\n    lastContactDays = Math.min(lastContactDays, \n      Math.ceil((new Date() - new Date(hubspotLastContact)) / (1000 * 60 * 60 * 24))\n    );\n  }\n  if (notionLastContact) {\n    lastContactDays = Math.min(lastContactDays, \n      Math.ceil((new Date() - new Date(notionLastContact)) / (1000 * 60 * 60 * 24))\n    );\n  }\n  \n  // Communication assessment (from Notion)\n  const communicationRating = client.properties['Communication Rating']?.select?.name || 'Average';\n  const relationshipStrength = client.properties['Relationship Strength']?.select?.name || 'Neutral';\n  \n  // Calculate Relationship Score with enhanced HubSpot data\n  let relationshipScore = 100;\n  \n  // Meeting frequency scoring (enhanced with HubSpot data)\n  if (totalMeetings < 3) relationshipScore -= 25;\n  else if (totalMeetings < 6) relationshipScore -= 15;\n  else if (totalMeetings >= 10) relationshipScore += 5;\n  \n  // Meeting sentiment scoring (from HubSpot analysis)\n  if (totalMeetings > 0) {\n    const positiveRatio = positiveMeetings / totalMeetings;\n    if (positiveRatio < 0.3) relationshipScore -= 40;\n    else if (positiveRatio < 0.5) relationshipScore -= 25;\n    else if (positiveRatio < 0.7) relationshipScore -= 10;\n    else if (positiveRatio >= 0.8) relationshipScore += 10;\n  }\n  \n  // Renewal risk scoring\n  if (daysToRenewal < 30) relationshipScore -= 30;\n  else if (daysToRenewal < 60) relationshipScore -= 20;\n  else if (daysToRenewal < 90) relationshipScore -= 10;\n  \n  // Communication responsiveness (enhanced with HubSpot data)\n  if (lastContactDays > 21) relationshipScore -= 25;\n  else if (lastContactDays > 14) relationshipScore -= 15;\n  else if (lastContactDays > 7) relationshipScore -= 5;\n  else if (lastContactDays <= 3) relationshipScore += 5;\n  \n  // HubSpot engagement indicators\n  const hubspotLastVisit = hubspotCompany.properties?.hs_analytics_last_visit_timestamp;\n  if (hubspotLastVisit) {\n    const daysSinceVisit = Math.ceil((new Date() - new Date(parseInt(hubspotLastVisit))) / (1000 * 60 * 60 * 24));\n    if (daysSinceVisit > 30) relationshipScore -= 10;\n    else if (daysSinceVisit <= 7) relationshipScore += 5;\n  }\n  \n  // Communication quality and relationship strength (from Notion)\n  switch (communicationRating) {\n    case 'Excellent': relationshipScore += 15; break;\n    case 'Good': relationshipScore += 5; break;\n    case 'Below Average': relationshipScore -= 15; break;\n    case 'Poor': relationshipScore -= 25; break;\n  }\n  \n  switch (relationshipStrength) {\n    case 'Champion': relationshipScore += 20; break;\n    case 'Strong': relationshipScore += 10; break;\n    case 'Weak': relationshipScore -= 15; break;\n    case 'Strained': relationshipScore -= 30; break;\n  }\n  \n  relationshipScore = Math.max(0, Math.min(100, relationshipScore));\n  \n  // Determine relationship color\n  let relationshipColor = 'Red';\n  if (relationshipScore >= 75) relationshipColor = 'Green';\n  else if (relationshipScore >= 50) relationshipColor = 'Yellow';\n  \n  // Engagement Data (from Notion)\n  const onboardingProgress = client.properties['Onboarding Progress %']?.number || 0;\n  const learningModulesCompleted = client.properties['Learning Modules Completed']?.number || 0;\n  const certificationsEarned = client.properties['Certifications Earned']?.number || 0;\n  const trainingAttendanceRate = client.properties['Training Attendance Rate']?.number || 0;\n  \n  const engagementScore = Math.min(100,\n    (onboardingProgress * 0.4) + \n    (learningModulesCompleted * 4) + \n    (certificationsEarned * 12) +\n    (trainingAttendanceRate * 0.4)\n  );\n  \n  // ARR Data (Notion + HubSpot)\n  const currentARR = client.properties['Current ARR']?.number || \n    hubspotCompany.properties?.hs_total_deal_value || 0;\n  const arrTrend = client.properties['ARR Trend']?.select?.name || 'Stable';\n  const paymentStatus = client.properties['Payment Status']?.select?.name || 'Current';\n  const contractType = client.properties['Contract Type']?.select?.name || 'Standard';\n  \n  // Calculate ARR Health Score\n  let arrScore = 100;\n  \n  switch (paymentStatus) {\n    case 'Late': arrScore -= 25; break;\n    case 'Overdue': arrScore -= 45; break;\n    case 'Failed': arrScore -= 65; break;\n  }\n  \n  switch (arrTrend) {\n    case 'Increasing': arrScore += 15; break;\n    case 'Decreasing': arrScore -= 25; break;\n  }\n  \n  if (currentARR < 1000) arrScore -= 15;\n  else if (currentARR > 10000) arrScore += 10;\n  \n  if (contractType === 'At Risk') arrScore -= 30;\n  else if (contractType === 'Enterprise') arrScore += 5;\n  \n  arrScore = Math.max(0, Math.min(100, arrScore));\n  \n  // Support Data from Zendesk\n  const supportTickets30d = zendeskTickets.length;\n  const criticalTickets = zendeskCritical.length;\n  \n  // Calculate average satisfaction from Zendesk tickets\n  let totalSatisfaction = 0;\n  let satisfactionCount = 0;\n  zendeskTickets.forEach(ticket => {\n    if (ticket.satisfaction_rating && ticket.satisfaction_rating.score) {\n      totalSatisfaction += ticket.satisfaction_rating.score === 'good' ? 5 : \n                          ticket.satisfaction_rating.score === 'bad' ? 1 : 3;\n      satisfactionCount++;\n    }\n  });\n  const avgSatisfaction = satisfactionCount > 0 ? totalSatisfaction / satisfactionCount : 3;\n  \n  // Count escalated tickets\n  const escalatedTickets = zendeskTickets.filter(ticket => \n    ticket.status === 'pending' && ticket.priority === 'high'\n  ).length;\n  \n  // Calculate Support Health Score\n  const supportScore = Math.max(0, Math.min(100,\n    100 - (supportTickets30d * 2) - (criticalTickets * 12) - (escalatedTickets * 8) + \n    ((avgSatisfaction - 3) * 15)\n  ));\n  \n  // Calculate Overall Health Score\n  const overallHealthScore = Math.round(\n    (featureScore * 0.25) +\n    (relationshipScore * 0.25) +\n    (engagementScore * 0.20) +\n    (arrScore * 0.15) +\n    (supportScore * 0.15)\n  );\n  \n  // Determine health status\n  let healthStatus = 'Critical';\n  if (overallHealthScore >= 80) healthStatus = 'Healthy';\n  else if (overallHealthScore >= 60) healthStatus = 'At Risk';\n  \n  // Generate insights with API data\n  const keyInsights = [];\n  if (featureScore < 60) keyInsights.push('Low feature adoption');\n  if (relationshipColor === 'Red') keyInsights.push('Relationship at risk');\n  if (engagementScore < 50) keyInsights.push('Poor onboarding progress');\n  if (arrScore < 70) keyInsights.push('Payment or billing issues');\n  if (supportScore < 60) keyInsights.push('High support burden');\n  if (daysToRenewal < 60 && overallHealthScore < 70) keyInsights.push('Renewal risk');\n  if (lastContactDays > 21) keyInsights.push('Overdue for contact');\n  if (criticalTickets > 2) keyInsights.push('Multiple critical support issues');\n  if (totalMeetings === 0) keyInsights.push('No recent meetings scheduled');\n  \n  // Expansion opportunities with API insights\n  const expansionOpportunities = [];\n  if (featureScore > 80 && currentARR < 5000) expansionOpportunities.push('High engagement - upsell ready');\n  if (relationshipScore > 85) expansionOpportunities.push('Strong relationship - expansion ready');\n  if (engagementScore > 90) expansionOpportunities.push('Highly engaged - advocate potential');\n  if (arrTrend === 'Increasing') expansionOpportunities.push('Growing usage - expansion timing');\n  if (certificationsEarned > 2) expansionOpportunities.push('Power user - advanced features');\n  if (supportScore > 85 && totalMeetings > 6) expansionOpportunities.push('Satisfied customer - referral potential');\n  \n  // Action items with API context\n  const actionItems = [];\n  if (relationshipColor === 'Red') actionItems.push('Schedule immediate check-in call');\n  if (daysToRenewal < 60 && overallHealthScore < 70) actionItems.push('Initiate renewal conversation');\n  if (supportScore < 50) actionItems.push('Review support ticket trends');\n  if (onboardingProgress < 50) actionItems.push('Re-engage with onboarding team');\n  if (lastContactDays > 21) actionItems.push('Reach out - overdue for contact');\n  if (featureScore < 40) actionItems.push('Schedule product training session');\n  if (paymentStatus !== 'Current') actionItems.push('Address payment issues');\n  if (criticalTickets > 1) actionItems.push('Escalate critical support issues');\n  if (totalMeetings === 0 && daysToRenewal < 180) actionItems.push('Schedule relationship building meeting');\n  \n  // Action flags\n  const needsImmediateAttention = (\n    overallHealthScore < 50 || \n    relationshipColor === 'Red' || \n    actionItems.length > 2 ||\n    paymentStatus === 'Overdue' ||\n    criticalTickets > 2 ||\n    (daysToRenewal < 30 && overallHealthScore < 70)\n  );\n  \n  const expansionReady = (\n    overallHealthScore > 80 && \n    expansionOpportunities.length > 0 &&\n    relationshipScore > 70 &&\n    supportScore > 70\n  );\n  \n  const renewalRisk = (\n    daysToRenewal < 90 && \n    (overallHealthScore < 70 || relationshipColor === 'Red' || \n     paymentStatus !== 'Current' || supportScore < 60)\n  );\n  \n  results.push({\n    clientId: clientId,\n    clientName: clientName,\n    \n    // Calculated scores\n    overallHealthScore: overallHealthScore,\n    healthStatus: healthStatus,\n    featureAdoptionScore: Math.round(featureScore),\n    relationshipScore: Math.round(relationshipScore),\n    relationshipColor: relationshipColor,\n    engagementScore: Math.round(engagementScore),\n    arrHealthScore: Math.round(arrScore),\n    supportHealthScore: Math.round(supportScore),\n    \n    // API-enhanced data\n    totalMeetings: totalMeetings,\n    positiveMeetings: positiveMeetings,\n    meetingTopics: meetingTopics.slice(0, 3).join('; '),\n    meetingHighlights: meetingHighlights.slice(0, 2).join('; '),\n    supportTickets30d: supportTickets30d,\n    criticalTickets: criticalTickets,\n    supportSatisfaction: Math.round(avgSatisfaction * 100) / 100,\n    \n    // Insights and actions\n    keyInsights: keyInsights,\n    expansionOpportunities: expansionOpportunities,\n    actionItems: actionItems,\n    \n    // Flags\n    needsImmediateAttention: needsImmediateAttention,\n    expansionReady: expansionReady,\n    renewalRisk: renewalRisk,\n    \n    // Metadata\n    calculatedAt: new Date().toISOString(),\n    daysToRenewal: daysToRenewal,\n    lastContactDays: lastContactDays,\n    dataSource: 'HubSpot + Zendesk + Notion'\n  });\n}\n\nreturn results.map(result => ({ json: result }));"
+      },
+      "id": "calculate-comprehensive-scores",
+      "name": "Calculate Comprehensive Health Scores",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 400]
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "update",
+        "pageId": "={{ $json.clientId }}",
+        "simple": false,
+        "propertiesUi": {
+          "propertyValues": [
+            {
+              "key": "Overall Health Score",
+              "numberValue": "={{ $json.overallHealthScore }}"
+            },
+            {
+              "key": "Health Status",
+              "selectValue": "={{ $json.healthStatus }}"
+            },
+            {
+              "key": "Feature Adoption Score",
+              "numberValue": "={{ $json.featureAdoptionScore }}"
+            },
+            {
+              "key": "Relationship Score",
+              "numberValue": "={{ $json.relationshipScore }}"
+            },
+            {
+              "key": "Relationship Color",
+              "selectValue": "={{ $json.relationshipColor }}"
+            },
+            {
+              "key": "Engagement Score",
+              "numberValue": "={{ $json.engagementScore }}"
+            },
+            {
+              "key": "ARR Health Score",
+              "numberValue": "={{ $json.arrHealthScore }}"
+            },
+            {
+              "key": "Support Health Score",
+              "numberValue": "={{ $json.supportHealthScore }}"
+            },
+            {
+              "key": "Meetings Last 3 Months",
+              "numberValue": "={{ $json.totalMeetings }}"
+            },
+            {
+              "key": "Positive Meetings",
+              "numberValue": "={{ $json.positiveMeetings }}"
+            },
+            {
+              "key": "Recent Meeting Topics",
+              "richTextValue": "={{ $json.meetingTopics }}"
+            },
+            {
+              "key": "Meeting Highlights",
+              "richTextValue": "={{ $json.meetingHighlights }}"
+            },
+            {
+              "key": "Support Tickets (30d)",
+              "numberValue": "={{ $json.supportTickets30d }}"
+            },
+            {
+              "key": "Critical Tickets",
+              "numberValue": "={{ $json.criticalTickets }}"
+            },
+            {
+              "key": "Support Satisfaction",
+              "numberValue": "={{ $json.supportSatisfaction }}"
+            },
+            {
+              "key": "Key Insights",
+              "multiSelectValue": "={{ $json.keyInsights }}"
+            },
+            {
+              "key": "Expansion Opportunities",
+              "multiSelectValue": "={{ $json.expansionOpportunities }}"
+            },
+            {
+              "key": "Action Items",
+              "multiSelectValue": "={{ $json.actionItems }}"
+            },
+            {
+              "key": "Needs Immediate Attention",
+              "checkboxValue": "={{ $json.needsImmediateAttention }}"
+            },
+            {
+              "key": "Expansion Ready",
+              "checkboxValue": "={{ $json.expansionReady }}"
+            },
+            {
+              "key": "Renewal Risk",
+              "checkboxValue": "={{ $json.renewalRisk }}"
+            },
+            {
+              "key": "Last Health Calculation",
+              "dateValue": "={{ $json.calculatedAt }}"
+            },
+            {
+              "key": "Data Source",
+              "selectValue": "={{ $json.dataSource }}"
+            }
+          ]
+        }
+      },
+      "id": "update-comprehensive-scores",
+      "name": "Update Comprehensive Health Scores",
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2,
+      "position": [1120, 400],
+      "credentials": {
+        "notionApi": {
+          "id": "YOUR_NOTION_CREDENTIAL_ID",
+          "name": "Notion API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "needs-attention",
+              "leftValue": "={{ $json.needsImmediateAttention }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equal"
+              }
+            }
+          ],
+          "combineOperation": "any"
+        },
+        "options": {}
+      },
+      "id": "filter-critical-api",
+      "name": "Filter Critical Clients",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "YOUR_SLACK_CHANNEL_ID",
+          "mode": "list",
+          "cachedResultName": "#customer-success"
+        },
+        "text": "🚨 **COMPREHENSIVE HEALTH ALERT**\\n*Data from HubSpot + Zendesk + Notion*\\n\\n**Client:** {{ $json.clientName }}\\n**Overall Health:** {{ $json.overallHealthScore }}/100 ({{ $json.healthStatus }})\\n**Relationship:** {{ $json.relationshipColor }} ({{ $json.relationshipScore }}/100)\\n\\n**Recent Activity (HubSpot):**\\n• Meetings (3mo): {{ $json.totalMeetings }} ({{ $json.positiveMeetings }} positive)\\n• Recent Topics: {{ $json.meetingTopics }}\\n• Last Contact: {{ $json.lastContactDays }} days ago\\n\\n**Support Issues (Zendesk):**\\n• Total Tickets (30d): {{ $json.supportTickets30d }}\\n• Critical Tickets: {{ $json.criticalTickets }}\\n• Satisfaction: {{ $json.supportSatisfaction }}/5\\n\\n**Key Issues:**\\n• {{ $json.keyInsights.join('\\n• ') }}\\n\\n**Required Actions:**\\n• {{ $json.actionItems.join('\\n• ') }}\\n\\n**Component Scores:**\\n• Feature Adoption: {{ $json.featureAdoptionScore }}/100\\n• Relationship: {{ $json.relationshipScore }}/100\\n• Engagement: {{ $json.engagementScore }}/100\\n• ARR Health: {{ $json.arrHealthScore }}/100\\n• Support Health: {{ $json.supportHealthScore }}/100\\n\\n_Comprehensive data view in Notion Dashboard_",
+        "options": {}
+      },
+      "id": "slack-critical-comprehensive",
+      "name": "Send Comprehensive Critical Alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [1560, 300],
+      "credentials": {
+        "slackApi": {
+          "id": "YOUR_SLACK_CREDENTIAL_ID",
+          "name": "Slack API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "expansion-ready",
+              "leftValue": "={{ $json.expansionReady }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equal"
+              }
+            }
+          ],
+          "combineOperation": "any"
+        },
+        "options": {}
+      },
+      "id": "filter-expansion-api",
+      "name": "Filter Expansion Opportunities",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [1340, 500]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "YOUR_SALES_CHANNEL_ID",
+          "mode": "list",
+          "cachedResultName": "#sales-opportunities"
+        },
+        "text": "🚀 **COMPREHENSIVE EXPANSION OPPORTUNITY**\\n*Enhanced with HubSpot + Zendesk insights*\\n\\n**Client:** {{ $json.clientName }}\\n**Health Score:** {{ $json.overallHealthScore }}/100\\n**Relationship:** {{ $json.relationshipColor }} ({{ $json.relationshipScore }}/100)\\n\\n**Engagement Evidence (HubSpot):**\\n• Recent Meetings: {{ $json.totalMeetings }} ({{ Math.round($json.positiveMeetings / $json.totalMeetings * 100) }}% positive)\\n• Recent Topics: {{ $json.meetingTopics }}\\n• Meeting Highlights: {{ $json.meetingHighlights }}\\n\\n**Support Health (Zendesk):**\\n• Support Satisfaction: {{ $json.supportSatisfaction }}/5\\n• Recent Issues: {{ $json.supportTickets30d }} tickets ({{ $json.criticalTickets }} critical)\\n\\n**Expansion Indicators:**\\n• {{ $json.expansionOpportunities.join('\\n• ') }}\\n\\n**Recommended Next Steps:**\\n• Schedule expansion conversation with decision makers\\n• Present advanced features demo based on usage patterns\\n• Leverage positive meeting sentiment for growth discussion\\n• Address any remaining support concerns first\\n\\n**Contact Context:**\\n• Last Contact: {{ $json.lastContactDays }} days ago\\n• Renewal Timeline: {{ $json.daysToRenewal }} days\\n\\n_Complete client intelligence in Notion Dashboard_",
+        "options": {}
+      },
+      "id": "slack-expansion-comprehensive",
+      "name": "Send Comprehensive Expansion Alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [1560, 500],
+      "credentials": {
+        "slackApi": {
+          "id": "YOUR_SLACK_CREDENTIAL_ID",
+          "name": "Slack API"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Weekly Monday 8AM Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Client List from Notion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Client List from Notion": {
+      "main": [
+        [
+          {
+            "node": "Get HubSpot Company Data",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get HubSpot Meetings (3mo)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Zendesk Support Tickets",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Critical Zendesk Tickets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get HubSpot Company Data": {
+      "main": [
+        [
+          {
+            "node": "Calculate Comprehensive Health Scores",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get HubSpot Meetings (3mo)": {
+      "main": [
+        [
+          {
+            "node": "Calculate Comprehensive Health Scores",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Zendesk Support Tickets": {
+      "main": [
+        [
+          {
+            "node": "Calculate Comprehensive Health Scores",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Critical Zendesk Tickets": {
+      "main": [
+        [
+          {
+            "node": "Calculate Comprehensive Health Scores",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Comprehensive Health Scores": {
+      "main": [
+        [
+          {
+            "node": "Update Comprehensive Health Scores",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Filter Critical Clients",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Filter Expansion Opportunities",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Critical Clients": {
+      "main": [
+        [
+          {
+            "node": "Send Comprehensive Critical Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Expansion Opportunities": {
+      "main": [
+        [
+          {
+            "node": "Send Comprehensive Expansion Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["customer-success", "comprehensive", "hubspot", "zendesk", "notion"],
+  "triggerCount": 0,
+  "updatedAt": "2025-01-02T18:30:00.000Z",
+  "versionId": "1"
+}
+

@@ -1,0 +1,366 @@
+{
+  "name": "Weekly Customer Health Scoring - Notion Only",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 1"
+            }
+          ]
+        }
+      },
+      "id": "weekly-trigger",
+      "name": "Weekly Monday 9AM Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 400]
+    },
+    {
+      "parameters": {
+        "databaseId": "YOUR_CUSTOMER_SUCCESS_DATABASE_ID",
+        "simple": false,
+        "options": {}
+      },
+      "id": "get-all-clients",
+      "name": "Get All Client Data",
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2,
+      "position": [460, 400],
+      "credentials": {
+        "notionApi": {
+          "id": "YOUR_NOTION_CREDENTIAL_ID",
+          "name": "Notion API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Weekly Customer Health Score Calculator\n// Processes manually entered data from Notion and calculates all scores\n\nconst items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const client = item.json;\n  \n  // Extract client data from Notion properties\n  const clientName = client.properties['Client Name']?.title?.[0]?.plain_text || 'Unknown Client';\n  const clientId = client.id;\n  \n  // Skip if client doesn't have basic required data\n  if (!clientName || clientName === 'Unknown Client') {\n    continue;\n  }\n  \n  // Feature Adoption Data (from manual entry)\n  const featuresUsed = client.properties['Features Used']?.number || 0;\n  const totalFeatures = client.properties['Total Features Available']?.number || 20;\n  const advancedFeaturesUsed = client.properties['Advanced Features Used']?.number || 0;\n  \n  // Calculate Feature Adoption Score (0-100)\n  const featureAdoptionRate = totalFeatures > 0 ? (featuresUsed / totalFeatures) * 100 : 0;\n  const featureScore = Math.min(100, \n    (featureAdoptionRate * 0.7) + (advancedFeaturesUsed * 5)\n  );\n  \n  // Relationship Data (from manual entry)\n  const totalMeetings = client.properties['Meetings Last 3 Months']?.number || 0;\n  const positiveMeetings = client.properties['Positive Meetings']?.number || 0;\n  const meetingTopics = client.properties['Recent Meeting Topics']?.rich_text?.[0]?.plain_text || '';\n  const meetingHighlights = client.properties['Meeting Highlights']?.rich_text?.[0]?.plain_text || '';\n  \n  // Renewal and contact timing\n  const renewalDateStr = client.properties['Renewal Date']?.date?.start;\n  const renewalDate = renewalDateStr ? new Date(renewalDateStr) : new Date(Date.now() + 365*24*60*60*1000);\n  const daysToRenewal = Math.max(0, \n    Math.ceil((renewalDate - new Date()) / (1000 * 60 * 60 * 24))\n  );\n  \n  const lastContactStr = client.properties['Last Contact Date']?.date?.start;\n  const lastContactDays = lastContactStr ? \n    Math.ceil((new Date() - new Date(lastContactStr)) / (1000 * 60 * 60 * 24)) : 999;\n  \n  // Relationship quality assessments\n  const communicationRating = client.properties['Communication Rating']?.select?.name || 'Average';\n  const relationshipStrength = client.properties['Relationship Strength']?.select?.name || 'Neutral';\n  \n  // Calculate Relationship Score (0-100) with JavaScript Logic\n  let relationshipScore = 100;\n  \n  // Meeting frequency scoring\n  if (totalMeetings < 3) relationshipScore -= 25;\n  else if (totalMeetings < 6) relationshipScore -= 15;\n  else if (totalMeetings >= 10) relationshipScore += 5;\n  \n  // Meeting sentiment scoring\n  if (totalMeetings > 0) {\n    const positiveRatio = positiveMeetings / totalMeetings;\n    if (positiveRatio < 0.3) relationshipScore -= 40;\n    else if (positiveRatio < 0.5) relationshipScore -= 25;\n    else if (positiveRatio < 0.7) relationshipScore -= 10;\n    else if (positiveRatio >= 0.8) relationshipScore += 10;\n  }\n  \n  // Renewal risk scoring\n  if (daysToRenewal < 30) relationshipScore -= 30;\n  else if (daysToRenewal < 60) relationshipScore -= 20;\n  else if (daysToRenewal < 90) relationshipScore -= 10;\n  \n  // Communication responsiveness scoring\n  if (lastContactDays > 21) relationshipScore -= 25;\n  else if (lastContactDays > 14) relationshipScore -= 15;\n  else if (lastContactDays > 7) relationshipScore -= 5;\n  else if (lastContactDays <= 3) relationshipScore += 5;\n  \n  // Communication quality scoring\n  switch (communicationRating) {\n    case 'Excellent':\n      relationshipScore += 15;\n      break;\n    case 'Good':\n      relationshipScore += 5;\n      break;\n    case 'Below Average':\n      relationshipScore -= 15;\n      break;\n    case 'Poor':\n      relationshipScore -= 25;\n      break;\n  }\n  \n  // Relationship strength scoring\n  switch (relationshipStrength) {\n    case 'Champion':\n      relationshipScore += 20;\n      break;\n    case 'Strong':\n      relationshipScore += 10;\n      break;\n    case 'Weak':\n      relationshipScore -= 15;\n      break;\n    case 'Strained':\n      relationshipScore -= 30;\n      break;\n  }\n  \n  // Ensure relationship score stays within bounds\n  relationshipScore = Math.max(0, Math.min(100, relationshipScore));\n  \n  // Determine relationship color based on score\n  let relationshipColor = 'Red';\n  if (relationshipScore >= 75) relationshipColor = 'Green';\n  else if (relationshipScore >= 50) relationshipColor = 'Yellow';\n  \n  // Engagement/Onboarding Data\n  const onboardingProgress = client.properties['Onboarding Progress %']?.number || 0;\n  const learningModulesCompleted = client.properties['Learning Modules Completed']?.number || 0;\n  const certificationsEarned = client.properties['Certifications Earned']?.number || 0;\n  const trainingAttendanceRate = client.properties['Training Attendance Rate']?.number || 0;\n  \n  // Calculate Engagement Score (0-100)\n  const engagementScore = Math.min(100,\n    (onboardingProgress * 0.4) + \n    (learningModulesCompleted * 4) + \n    (certificationsEarned * 12) +\n    (trainingAttendanceRate * 0.4)\n  );\n  \n  // ARR/Financial Data\n  const currentARR = client.properties['Current ARR']?.number || 0;\n  const arrTrend = client.properties['ARR Trend']?.select?.name || 'Stable';\n  const paymentStatus = client.properties['Payment Status']?.select?.name || 'Current';\n  const contractType = client.properties['Contract Type']?.select?.name || 'Standard';\n  \n  // Calculate ARR Health Score (0-100)\n  let arrScore = 100;\n  \n  // Payment status penalties\n  switch (paymentStatus) {\n    case 'Late':\n      arrScore -= 25;\n      break;\n    case 'Overdue':\n      arrScore -= 45;\n      break;\n    case 'Failed':\n      arrScore -= 65;\n      break;\n  }\n  \n  // ARR trend adjustments\n  switch (arrTrend) {\n    case 'Increasing':\n      arrScore += 15;\n      break;\n    case 'Decreasing':\n      arrScore -= 25;\n      break;\n  }\n  \n  // Contract value and type adjustments\n  if (currentARR < 1000) arrScore -= 15;\n  else if (currentARR > 10000) arrScore += 10;\n  \n  if (contractType === 'At Risk') arrScore -= 30;\n  else if (contractType === 'Enterprise') arrScore += 5;\n  \n  arrScore = Math.max(0, Math.min(100, arrScore));\n  \n  // Support Data\n  const supportTickets30d = client.properties['Support Tickets (30d)']?.number || 0;\n  const criticalTickets = client.properties['Critical Tickets']?.number || 0;\n  const supportSatisfaction = client.properties['Support Satisfaction']?.number || 3;\n  const escalatedTickets = client.properties['Escalated Tickets']?.number || 0;\n  \n  // Calculate Support Health Score (0-100)\n  const supportScore = Math.max(0, Math.min(100,\n    100 - (supportTickets30d * 2) - (criticalTickets * 12) - (escalatedTickets * 8) + \n    ((supportSatisfaction - 3) * 15)\n  ));\n  \n  // Calculate Overall Health Score (weighted average)\n  const overallHealthScore = Math.round(\n    (featureScore * 0.25) +\n    (relationshipScore * 0.25) +\n    (engagementScore * 0.20) +\n    (arrScore * 0.15) +\n    (supportScore * 0.15)\n  );\n  \n  // Determine overall health status\n  let healthStatus = 'Critical';\n  if (overallHealthScore >= 80) healthStatus = 'Healthy';\n  else if (overallHealthScore >= 60) healthStatus = 'At Risk';\n  \n  // Generate intelligent insights based on scores\n  const keyInsights = [];\n  if (featureScore < 60) keyInsights.push('Low feature adoption');\n  if (relationshipColor === 'Red') keyInsights.push('Relationship at risk');\n  if (engagementScore < 50) keyInsights.push('Poor onboarding progress');\n  if (arrScore < 70) keyInsights.push('Payment or billing issues');\n  if (supportScore < 60) keyInsights.push('High support burden');\n  if (daysToRenewal < 60 && overallHealthScore < 70) keyInsights.push('Renewal risk');\n  if (lastContactDays > 21) keyInsights.push('Overdue for contact');\n  \n  // Identify expansion opportunities\n  const expansionOpportunities = [];\n  if (featureScore > 80 && currentARR < 5000) expansionOpportunities.push('High engagement - upsell ready');\n  if (relationshipScore > 85) expansionOpportunities.push('Strong relationship - expansion ready');\n  if (engagementScore > 90) expansionOpportunities.push('Highly engaged - advocate potential');\n  if (arrTrend === 'Increasing') expansionOpportunities.push('Growing usage - expansion timing');\n  if (certificationsEarned > 2) expansionOpportunities.push('Power user - advanced features');\n  \n  // Generate specific action items\n  const actionItems = [];\n  if (relationshipColor === 'Red') actionItems.push('Schedule immediate check-in call');\n  if (daysToRenewal < 60 && overallHealthScore < 70) actionItems.push('Initiate renewal conversation');\n  if (supportScore < 50) actionItems.push('Review support ticket trends');\n  if (onboardingProgress < 50) actionItems.push('Re-engage with onboarding team');\n  if (lastContactDays > 21) actionItems.push('Reach out - overdue for contact');\n  if (featureScore < 40) actionItems.push('Schedule product training session');\n  if (paymentStatus !== 'Current') actionItems.push('Address payment issues');\n  \n  // Determine action flags\n  const needsImmediateAttention = (\n    overallHealthScore < 50 || \n    relationshipColor === 'Red' || \n    actionItems.length > 2 ||\n    paymentStatus === 'Overdue' ||\n    (daysToRenewal < 30 && overallHealthScore < 70)\n  );\n  \n  const expansionReady = (\n    overallHealthScore > 80 && \n    expansionOpportunities.length > 0 &&\n    relationshipScore > 70\n  );\n  \n  const renewalRisk = (\n    daysToRenewal < 90 && \n    (overallHealthScore < 70 || relationshipColor === 'Red' || paymentStatus !== 'Current')\n  );\n  \n  // Compile results\n  results.push({\n    clientId: clientId,\n    clientName: clientName,\n    \n    // Calculated scores\n    overallHealthScore: overallHealthScore,\n    healthStatus: healthStatus,\n    featureAdoptionScore: Math.round(featureScore),\n    relationshipScore: Math.round(relationshipScore),\n    relationshipColor: relationshipColor,\n    engagementScore: Math.round(engagementScore),\n    arrHealthScore: Math.round(arrScore),\n    supportHealthScore: Math.round(supportScore),\n    \n    // Insights and recommendations\n    keyInsights: keyInsights,\n    expansionOpportunities: expansionOpportunities,\n    actionItems: actionItems,\n    \n    // Action flags\n    needsImmediateAttention: needsImmediateAttention,\n    expansionReady: expansionReady,\n    renewalRisk: renewalRisk,\n    \n    // Metadata\n    calculatedAt: new Date().toISOString(),\n    daysToRenewal: daysToRenewal,\n    lastContactDays: lastContactDays\n  });\n}\n\nreturn results.map(result => ({ json: result }));"
+      },
+      "id": "calculate-health-scores",
+      "name": "Calculate All Health Scores",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 400]
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "update",
+        "pageId": "={{ $json.clientId }}",
+        "simple": false,
+        "propertiesUi": {
+          "propertyValues": [
+            {
+              "key": "Overall Health Score",
+              "numberValue": "={{ $json.overallHealthScore }}"
+            },
+            {
+              "key": "Health Status",
+              "selectValue": "={{ $json.healthStatus }}"
+            },
+            {
+              "key": "Feature Adoption Score",
+              "numberValue": "={{ $json.featureAdoptionScore }}"
+            },
+            {
+              "key": "Relationship Score",
+              "numberValue": "={{ $json.relationshipScore }}"
+            },
+            {
+              "key": "Relationship Color",
+              "selectValue": "={{ $json.relationshipColor }}"
+            },
+            {
+              "key": "Engagement Score",
+              "numberValue": "={{ $json.engagementScore }}"
+            },
+            {
+              "key": "ARR Health Score",
+              "numberValue": "={{ $json.arrHealthScore }}"
+            },
+            {
+              "key": "Support Health Score",
+              "numberValue": "={{ $json.supportHealthScore }}"
+            },
+            {
+              "key": "Key Insights",
+              "multiSelectValue": "={{ $json.keyInsights }}"
+            },
+            {
+              "key": "Expansion Opportunities",
+              "multiSelectValue": "={{ $json.expansionOpportunities }}"
+            },
+            {
+              "key": "Action Items",
+              "multiSelectValue": "={{ $json.actionItems }}"
+            },
+            {
+              "key": "Needs Immediate Attention",
+              "checkboxValue": "={{ $json.needsImmediateAttention }}"
+            },
+            {
+              "key": "Expansion Ready",
+              "checkboxValue": "={{ $json.expansionReady }}"
+            },
+            {
+              "key": "Renewal Risk",
+              "checkboxValue": "={{ $json.renewalRisk }}"
+            },
+            {
+              "key": "Last Health Calculation",
+              "dateValue": "={{ $json.calculatedAt }}"
+            }
+          ]
+        }
+      },
+      "id": "update-client-scores",
+      "name": "Update Client Health Scores",
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2,
+      "position": [900, 400],
+      "credentials": {
+        "notionApi": {
+          "id": "YOUR_NOTION_CREDENTIAL_ID",
+          "name": "Notion API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "needs-attention",
+              "leftValue": "={{ $json.needsImmediateAttention }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equal"
+              }
+            }
+          ],
+          "combineOperation": "any"
+        },
+        "options": {}
+      },
+      "id": "filter-urgent-clients",
+      "name": "Filter Clients Needing Attention",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "YOUR_SLACK_CHANNEL_ID",
+          "mode": "list",
+          "cachedResultName": "#customer-success"
+        },
+        "text": "🚨 **WEEKLY CUSTOMER HEALTH ALERT**\\n\\n**Client:** {{ $json.clientName }}\\n**Overall Health:** {{ $json.overallHealthScore }}/100 ({{ $json.healthStatus }})\\n**Relationship Status:** {{ $json.relationshipColor }} ({{ $json.relationshipScore }}/100)\\n**Days to Renewal:** {{ $json.daysToRenewal }}\\n**Last Contact:** {{ $json.lastContactDays }} days ago\\n\\n**Key Issues:**\\n• {{ $json.keyInsights.join('\\n• ') }}\\n\\n**Required Actions:**\\n• {{ $json.actionItems.join('\\n• ') }}\\n\\n**Component Scores:**\\n• Feature Adoption: {{ $json.featureAdoptionScore }}/100\\n• Relationship: {{ $json.relationshipScore }}/100\\n• Engagement: {{ $json.engagementScore }}/100\\n• ARR Health: {{ $json.arrHealthScore }}/100\\n• Support Health: {{ $json.supportHealthScore }}/100\\n\\n_View full details in Notion Customer Success Dashboard_",
+        "options": {}
+      },
+      "id": "slack-urgent-alert",
+      "name": "Send Urgent Client Alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [1340, 300],
+      "credentials": {
+        "slackApi": {
+          "id": "YOUR_SLACK_CREDENTIAL_ID",
+          "name": "Slack API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "expansion-ready",
+              "leftValue": "={{ $json.expansionReady }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equal"
+              }
+            }
+          ],
+          "combineOperation": "any"
+        },
+        "options": {}
+      },
+      "id": "filter-expansion-ready",
+      "name": "Filter Expansion Ready Clients",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [1120, 500]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "YOUR_SALES_CHANNEL_ID",
+          "mode": "list",
+          "cachedResultName": "#sales-opportunities"
+        },
+        "text": "🚀 **WEEKLY EXPANSION OPPORTUNITY**\\n\\n**Client:** {{ $json.clientName }}\\n**Health Score:** {{ $json.overallHealthScore }}/100\\n**Relationship:** {{ $json.relationshipColor }} ({{ $json.relationshipScore }}/100)\\n\\n**Why They're Ready:**\\n• {{ $json.expansionOpportunities.join('\\n• ') }}\\n\\n**Engagement Metrics:**\\n• Feature Adoption: {{ $json.featureAdoptionScore }}/100\\n• Onboarding Progress: Complete\\n• Relationship Strength: Strong\\n\\n**Recommended Next Steps:**\\n• Schedule expansion conversation\\n• Present advanced features demo\\n• Discuss scaling opportunities\\n\\n_Full client profile in Notion Dashboard_",
+        "options": {}
+      },
+      "id": "slack-expansion-alert",
+      "name": "Send Expansion Opportunity Alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [1340, 500],
+      "credentials": {
+        "slackApi": {
+          "id": "YOUR_SLACK_CREDENTIAL_ID",
+          "name": "Slack API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Generate Weekly Summary Statistics\nconst allClients = $('Calculate All Health Scores').all();\n\nconst totalClients = allClients.length;\nconst healthyClients = allClients.filter(item => item.json.healthStatus === 'Healthy').length;\nconst atRiskClients = allClients.filter(item => item.json.healthStatus === 'At Risk').length;\nconst criticalClients = allClients.filter(item => item.json.healthStatus === 'Critical').length;\n\nconst greenRelationships = allClients.filter(item => item.json.relationshipColor === 'Green').length;\nconst yellowRelationships = allClients.filter(item => item.json.relationshipColor === 'Yellow').length;\nconst redRelationships = allClients.filter(item => item.json.relationshipColor === 'Red').length;\n\nconst needsAttention = allClients.filter(item => item.json.needsImmediateAttention).length;\nconst expansionReady = allClients.filter(item => item.json.expansionReady).length;\nconst renewalRisk = allClients.filter(item => item.json.renewalRisk).length;\n\nconst totalARR = allClients.reduce((sum, item) => {\n  const arr = parseFloat(item.json.currentARR) || 0;\n  return sum + arr;\n}, 0);\n\nconst avgHealthScore = totalClients > 0 ? \n  Math.round(allClients.reduce((sum, item) => sum + item.json.overallHealthScore, 0) / totalClients) : 0;\n\nreturn [{\n  json: {\n    date: new Date().toISOString().split('T')[0],\n    totalClients: totalClients,\n    healthyClients: healthyClients,\n    atRiskClients: atRiskClients,\n    criticalClients: criticalClients,\n    greenRelationships: greenRelationships,\n    yellowRelationships: yellowRelationships,\n    redRelationships: redRelationships,\n    clientsNeedingAttention: needsAttention,\n    expansionReadyClients: expansionReady,\n    renewalRiskClients: renewalRisk,\n    totalARR: totalARR,\n    avgHealthScore: avgHealthScore\n  }\n}];"
+      },
+      "id": "generate-weekly-summary",
+      "name": "Generate Weekly Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 600]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "YOUR_SLACK_CHANNEL_ID",
+          "mode": "list",
+          "cachedResultName": "#customer-success"
+        },
+        "text": "📊 **WEEKLY CUSTOMER SUCCESS SUMMARY**\\n*Generated: {{ $json.date }}*\\n\\n**Portfolio Overview:**\\n• Total Clients: {{ $json.totalClients }}\\n• Average Health Score: {{ $json.avgHealthScore }}/100\\n• Total ARR: ${{ $json.totalARR.toLocaleString() }}\\n\\n**Health Distribution:**\\n• 🟢 Healthy: {{ $json.healthyClients }} ({{ Math.round($json.healthyClients / $json.totalClients * 100) }}%)\\n• 🟡 At Risk: {{ $json.atRiskClients }} ({{ Math.round($json.atRiskClients / $json.totalClients * 100) }}%)\\n• 🔴 Critical: {{ $json.criticalClients }} ({{ Math.round($json.criticalClients / $json.totalClients * 100) }}%)\\n\\n**Relationship Health:**\\n• 🟢 Green: {{ $json.greenRelationships }}\\n• 🟡 Yellow: {{ $json.yellowRelationships }}\\n• 🔴 Red: {{ $json.redRelationships }}\\n\\n**Action Required:**\\n• Immediate Attention: {{ $json.clientsNeedingAttention }}\\n• Expansion Ready: {{ $json.expansionReadyClients }}\\n• Renewal Risk: {{ $json.renewalRiskClients }}\\n\\n_Full dashboard available in Notion_",
+        "options": {}
+      },
+      "id": "slack-weekly-summary",
+      "name": "Send Weekly Summary",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [1120, 600],
+      "credentials": {
+        "slackApi": {
+          "id": "YOUR_SLACK_CREDENTIAL_ID",
+          "name": "Slack API"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Weekly Monday 9AM Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get All Client Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get All Client Data": {
+      "main": [
+        [
+          {
+            "node": "Calculate All Health Scores",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate All Health Scores": {
+      "main": [
+        [
+          {
+            "node": "Update Client Health Scores",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Filter Clients Needing Attention",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Filter Expansion Ready Clients",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Generate Weekly Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Clients Needing Attention": {
+      "main": [
+        [
+          {
+            "node": "Send Urgent Client Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Expansion Ready Clients": {
+      "main": [
+        [
+          {
+            "node": "Send Expansion Opportunity Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Weekly Summary": {
+      "main": [
+        [
+          {
+            "node": "Send Weekly Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["customer-success", "weekly", "notion", "health-scoring"],
+  "triggerCount": 0,
+  "updatedAt": "2025-01-02T18:00:00.000Z",
+  "versionId": "1"
+}
+

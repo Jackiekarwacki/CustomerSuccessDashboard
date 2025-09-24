@@ -134,11 +134,9 @@ Dashboard-n8n/
 
 ---
 
-## 🎨 **Dashboard Preview**
+## 🎨 **Dashboard Features**
 
 ### **📊 Portfolio Health Overview**
-![Portfolio Health Dashboard](https://github.com/user/repo/raw/main/screenshots/portfolio-health-overview.png)
-
 **Key Features:**
 - **🎯 Health Status Grouping** - Instantly see At Risk (2), Critical (0), and Healthy (1) accounts
 - **📈 Visual Health Scores** - Progress bars show exact scores (TechCorp: 90, RetailMax: 74, StartupXYZ: 68)
@@ -147,8 +145,6 @@ Dashboard-n8n/
 - **📅 Renewal Dates** - Timeline awareness for proactive planning
 
 ### **⚡ n8n Automation Workflow**
-![n8n Workflow](https://github.com/user/repo/raw/main/screenshots/n8n-workflow.png)
-
 **Automation Pipeline:**
 1. **🕘 Weekly Monday 9AM Trigger** - Runs automatically every week
 2. **📥 Get All Client Data** - Pulls fresh data from Notion database (4 items processed)
@@ -156,8 +152,6 @@ Dashboard-n8n/
 4. **📤 Update Client Health Scores** - Writes calculated scores back to Notion (3 items updated)
 
 ### **🎯 Expansion Pipeline View**
-![Expansion Pipeline](https://github.com/user/repo/raw/main/screenshots/expansion-pipeline.png)
-
 **Expansion Identification:**
 - **✅ TechCorp Solutions** - Flagged as Expansion Ready with 85 Feature Adoption Score
 - **📊 Feature Usage** - Shows Feature 1, Feature 2, Feature 3 adoption
@@ -165,16 +159,12 @@ Dashboard-n8n/
 - **📅 Renewal Timeline** - March 8, 2026 gives time for expansion conversations
 
 ### **📅 Renewal Calendar View**
-![Renewal Calendar](https://github.com/user/repo/raw/main/screenshots/renewal-calendar.png)
-
 **Proactive Renewal Management:**
 - **📍 Visual Timeline** - September 24th highlighted for immediate attention
 - **🎯 Strategic Planning** - See all renewals at a glance for resource allocation
 - **⏰ Early Warning System** - Plan outreach 60-90 days before renewal dates
 
 ### **📋 Complete Client Database**
-![Client Database](https://github.com/user/repo/raw/main/screenshots/client-database-full.png)
-
 **Comprehensive View:**
 - **👥 All Client Data** - TechCorp (90→Healthy), StartupXYZ (68→At Risk), RetailMax (74→At Risk)
 - **🎯 Engagement Status** - Highly Engaged, Engaged levels clearly visible
